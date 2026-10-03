@@ -20,13 +20,18 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Create Android project
+      - name: Create DumCountdown Android project
         run: |
+          rm -rf app
           mkdir -p app/src/main/java/fr/dumoulin/dumcountdown
           mkdir -p app/src/main/res/layout
           mkdir -p app/src/main/res/xml
           mkdir -p app/src/main/res/values
           mkdir -p app/src/main/res/drawable
+
+          # ==========================================================
+          # SETTINGS.GRADLE
+          # ==========================================================
 
           cat > settings.gradle <<'EOF'
           pluginManagement {
@@ -49,11 +54,19 @@ jobs:
           include(":app")
           EOF
 
+          # ==========================================================
+          # BUILD.GRADLE RACINE
+          # ==========================================================
+
           cat > build.gradle <<'EOF'
           plugins {
               id 'com.android.application' version '8.7.3' apply false
           }
           EOF
+
+          # ==========================================================
+          # BUILD.GRADLE APP
+          # ==========================================================
 
           cat > app/build.gradle <<'EOF'
           plugins {
@@ -74,19 +87,57 @@ jobs:
           }
           EOF
 
+          # ==========================================================
+          # MANIFEST
+          # ==========================================================
+
           cat > app/src/main/AndroidManifest.xml <<'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
 
               <application
                   android:allowBackup="true"
                   android:label="DumCountdown"
                   android:supportsRtl="true"
                   android:theme="@style/AppTheme">
+
+                  <activity
+                      android:name=".ConfigActivity"
+                      android:exported="true">
+
+                      <intent-filter>
+                          <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+                      </intent-filter>
+
+                  </activity>
+
+                  <receiver
+                      android:name=".CountdownWidget"
+                      android:exported="true">
+
+                      <intent-filter>
+                          <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                          <action android:name="android.intent.action.TIME_SET" />
+                          <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                          <action android:name="android.intent.action.BOOT_COMPLETED" />
+                      </intent-filter>
+
+                      <meta-data
+                          android:name="android.appwidget.provider"
+                          android:resource="@xml/countdown_widget_info" />
+
+                  </receiver>
+
               </application>
 
           </manifest>
           EOF
+
+          # ==========================================================
+          # STYLES
+          # ==========================================================
 
           cat > app/src/main/res/values/styles.xml <<'EOF'
           <?xml version="1.0" encoding="utf-8"?>
@@ -97,11 +148,587 @@ jobs:
                   parent="android:style/Theme.Material.Light.NoActionBar">
 
                   <item name="android:fontFamily">sans</item>
-                  <item name="android:colorAccent">#FFFFFF</item>
+                  <item name="android:windowLightStatusBar">true</item>
+                  <item name="android:navigationBarColor">#FFFFFF</item>
+                  <item name="android:statusBarColor">#FFFFFF</item>
+                  <item name="android:colorAccent">#333333</item>
 
               </style>
 
           </resources>
+          EOF
+
+          # ==========================================================
+          # STRINGS
+          # ==========================================================
+
+          cat > app/src/main/res/values/strings.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <string name="app_name">DumCountdown</string>
+              <string name="widget_description">Compte à rebours en jours, heures et minutes</string>
+          </resources>
+          EOF
+
+          # ==========================================================
+          # FOND TRANSPARENT
+          # ==========================================================
+
+          cat > app/src/main/res/drawable/widget_background.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android"
+              android:shape="rectangle">
+
+              <solid android:color="#00000000" />
+
+              <corners android:radius="12dp" />
+
+          </shape>
+          EOF
+
+          # ==========================================================
+          # LAYOUT DU WIDGET
+          # ==========================================================
+
+          cat > app/src/main/res/layout/widget_countdown.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <LinearLayout
+              xmlns:android="http://schemas.android.com/apk/res/android"
+              android:id="@+id/widgetRoot"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent"
+              android:orientation="vertical"
+              android:gravity="center_vertical"
+              android:paddingLeft="6dp"
+              android:paddingRight="6dp"
+              android:paddingTop="2dp"
+              android:paddingBottom="2dp"
+              android:background="@drawable/widget_background">
+
+              <TextView
+                  android:id="@+id/title"
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:maxLines="1"
+                  android:ellipsize="end"
+                  android:text="ÉVÉNEMENT"
+                  android:textColor="#FFFFFFFF"
+                  android:textSize="11sp"
+                  android:textStyle="bold" />
+
+              <TextView
+                  android:id="@+id/countdown"
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:maxLines="1"
+                  android:text="128j · 10h · 23m"
+                  android:textColor="#FFFFFFFF"
+                  android:textSize="18sp"
+                  android:textStyle="bold" />
+
+          </LinearLayout>
+          EOF
+
+          # ==========================================================
+          # CONFIGURATION DU WIDGET
+          # ==========================================================
+
+          cat > app/src/main/res/xml/countdown_widget_info.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <appwidget-provider
+              xmlns:android="http://schemas.android.com/apk/res/android"
+              android:minWidth="110dp"
+              android:minHeight="40dp"
+              android:minResizeWidth="70dp"
+              android:minResizeHeight="40dp"
+              android:targetCellWidth="2"
+              android:targetCellHeight="1"
+              android:updatePeriodMillis="1800000"
+              android:initialLayout="@layout/widget_countdown"
+              android:configure="fr.dumoulin.dumcountdown.ConfigActivity"
+              android:resizeMode="horizontal|vertical"
+              android:widgetCategory="home_screen"
+              android:description="@string/widget_description" />
+          EOF
+
+          # ==========================================================
+          # ÉCRAN DE CONFIGURATION
+          # ==========================================================
+
+          cat > app/src/main/res/layout/activity_config.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <LinearLayout
+              xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent"
+              android:orientation="vertical"
+              android:padding="24dp"
+              android:background="#FFFFFFFF">
+
+              <TextView
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:text="DumCountdown"
+                  android:textColor="#FF111111"
+                  android:textSize="26sp"
+                  android:textStyle="bold"
+                  android:layout_marginBottom="24dp" />
+
+              <TextView
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:text="Nom de l’événement"
+                  android:textColor="#FF333333"
+                  android:textSize="14sp" />
+
+              <EditText
+                  android:id="@+id/eventName"
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:hint="Ex. RETRAITE"
+                  android:singleLine="true"
+                  android:textSize="18sp"
+                  android:layout_marginBottom="20dp" />
+
+              <TextView
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:text="Date"
+                  android:textColor="#FF333333"
+                  android:textSize="14sp" />
+
+              <DatePicker
+                  android:id="@+id/datePicker"
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:calendarViewShown="false"
+                  android:datePickerMode="spinner" />
+
+              <TextView
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:text="Heure"
+                  android:textColor="#FF333333"
+                  android:textSize="14sp"
+                  android:layout_marginTop="12dp" />
+
+              <TimePicker
+                  android:id="@+id/timePicker"
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:timePickerMode="spinner" />
+
+              <Button
+                  android:id="@+id/saveButton"
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:text="Créer le widget"
+                  android:textSize="16sp"
+                  android:layout_marginTop="24dp" />
+
+          </LinearLayout>
+          EOF
+
+          # ==========================================================
+          # COUNTDOWNWIDGET.JAVA
+          # ==========================================================
+
+          cat > app/src/main/java/fr/dumoulin/dumcountdown/CountdownWidget.java <<'EOF'
+          package fr.dumoulin.dumcountdown;
+
+          import android.app.AlarmManager;
+          import android.app.PendingIntent;
+          import android.appwidget.AppWidgetManager;
+          import android.appwidget.AppWidgetProvider;
+          import android.content.ComponentName;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.content.SharedPreferences;
+          import android.os.SystemClock;
+          import android.view.View;
+          import android.widget.RemoteViews;
+
+          public class CountdownWidget extends AppWidgetProvider {
+
+              public static final String ACTION_TICK =
+                      "fr.dumoulin.dumcountdown.ACTION_TICK";
+
+              private static final String PREFS = "DumCountdownPrefs";
+
+              @Override
+              public void onUpdate(
+                      Context context,
+                      AppWidgetManager appWidgetManager,
+                      int[] appWidgetIds) {
+
+                  for (int appWidgetId : appWidgetIds) {
+                      updateWidget(context, appWidgetManager, appWidgetId);
+                  }
+
+                  scheduleNextTick(context);
+              }
+
+              @Override
+              public void onReceive(Context context, Intent intent) {
+                  super.onReceive(context, intent);
+
+                  String action = intent.getAction();
+
+                  if (ACTION_TICK.equals(action)
+                          || Intent.ACTION_TIME_CHANGED.equals(action)
+                          || Intent.ACTION_TIMEZONE_CHANGED.equals(action)
+                          || Intent.ACTION_BOOT_COMPLETED.equals(action)) {
+
+                      AppWidgetManager manager =
+                              AppWidgetManager.getInstance(context);
+
+                      ComponentName component =
+                              new ComponentName(context, CountdownWidget.class);
+
+                      int[] ids = manager.getAppWidgetIds(component);
+
+                      for (int id : ids) {
+                          updateWidget(context, manager, id);
+                      }
+
+                      scheduleNextTick(context);
+                  }
+              }
+
+              public static void updateWidget(
+                      Context context,
+                      AppWidgetManager manager,
+                      int appWidgetId) {
+
+                  SharedPreferences prefs =
+                          context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+
+                  String title =
+                          prefs.getString("title_" + appWidgetId, "ÉVÉNEMENT");
+
+                  long target =
+                          prefs.getLong("target_" + appWidgetId, 0L);
+
+                  RemoteViews views =
+                          new RemoteViews(
+                                  context.getPackageName(),
+                                  R.layout.widget_countdown);
+
+                  if (title == null || title.trim().isEmpty()) {
+                      views.setViewVisibility(R.id.title, View.GONE);
+                  } else {
+                      views.setViewVisibility(R.id.title, View.VISIBLE);
+                      views.setTextViewText(R.id.title, title);
+                  }
+
+                  String result;
+
+                  if (target <= 0L) {
+
+                      result = "--j · --h · --m";
+
+                  } else {
+
+                      long diff = target - System.currentTimeMillis();
+
+                      if (diff <= 0L) {
+
+                          result = "0j · 00h · 00m";
+
+                      } else {
+
+                          long totalMinutes = diff / 60000L;
+
+                          long days =
+                                  totalMinutes / (24L * 60L);
+
+                          long hours =
+                                  (totalMinutes % (24L * 60L)) / 60L;
+
+                          long minutes =
+                                  totalMinutes % 60L;
+
+                          result =
+                                  days
+                                  + "j · "
+                                  + String.format("%02dh", hours)
+                                  + " · "
+                                  + String.format("%02dm", minutes);
+                      }
+                  }
+
+                  views.setTextViewText(R.id.countdown, result);
+
+                  Intent configIntent =
+                          new Intent(context, ConfigActivity.class);
+
+                  configIntent.putExtra(
+                          AppWidgetManager.EXTRA_APPWIDGET_ID,
+                          appWidgetId);
+
+                  PendingIntent pendingIntent =
+                          PendingIntent.getActivity(
+                                  context,
+                                  appWidgetId,
+                                  configIntent,
+                                  PendingIntent.FLAG_UPDATE_CURRENT
+                                          | PendingIntent.FLAG_IMMUTABLE);
+
+                  views.setOnClickPendingIntent(
+                          R.id.widgetRoot,
+                          pendingIntent);
+
+                  manager.updateAppWidget(appWidgetId, views);
+              }
+
+              public static void scheduleNextTick(Context context) {
+
+                  AlarmManager alarmManager =
+                          (AlarmManager)
+                                  context.getSystemService(Context.ALARM_SERVICE);
+
+                  Intent intent =
+                          new Intent(context, CountdownWidget.class);
+
+                  intent.setAction(ACTION_TICK);
+
+                  PendingIntent pendingIntent =
+                          PendingIntent.getBroadcast(
+                                  context,
+                                  1001,
+                                  intent,
+                                  PendingIntent.FLAG_UPDATE_CURRENT
+                                          | PendingIntent.FLAG_IMMUTABLE);
+
+                  long now = System.currentTimeMillis();
+
+                  long delay =
+                          60000L - (now % 60000L) + 500L;
+
+                  long trigger =
+                          SystemClock.elapsedRealtime() + delay;
+
+                  if (alarmManager != null) {
+
+                      try {
+
+                          alarmManager.setExactAndAllowWhileIdle(
+                                  AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                                  trigger,
+                                  pendingIntent);
+
+                      } catch (SecurityException e) {
+
+                          alarmManager.set(
+                                  AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                                  trigger,
+                                  pendingIntent);
+                      }
+                  }
+              }
+
+              @Override
+              public void onDeleted(
+                      Context context,
+                      int[] appWidgetIds) {
+
+                  SharedPreferences prefs =
+                          context.getSharedPreferences(
+                                  PREFS,
+                                  Context.MODE_PRIVATE);
+
+                  SharedPreferences.Editor editor =
+                          prefs.edit();
+
+                  for (int id : appWidgetIds) {
+                      editor.remove("title_" + id);
+                      editor.remove("target_" + id);
+                  }
+
+                  editor.apply();
+              }
+          }
+          EOF
+
+          # ==========================================================
+          # CONFIGACTIVITY.JAVA
+          # ==========================================================
+
+          cat > app/src/main/java/fr/dumoulin/dumcountdown/ConfigActivity.java <<'EOF'
+          package fr.dumoulin.dumcountdown;
+
+          import android.app.Activity;
+          import android.appwidget.AppWidgetManager;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.content.SharedPreferences;
+          import android.os.Bundle;
+          import android.widget.Button;
+          import android.widget.DatePicker;
+          import android.widget.EditText;
+          import android.widget.TimePicker;
+
+          import java.util.Calendar;
+
+          public class ConfigActivity extends Activity {
+
+              private static final String PREFS =
+                      "DumCountdownPrefs";
+
+              private int appWidgetId =
+                      AppWidgetManager.INVALID_APPWIDGET_ID;
+
+              private EditText eventName;
+              private DatePicker datePicker;
+              private TimePicker timePicker;
+
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+
+                  setResult(RESULT_CANCELED);
+
+                  setContentView(R.layout.activity_config);
+
+                  eventName =
+                          findViewById(R.id.eventName);
+
+                  datePicker =
+                          findViewById(R.id.datePicker);
+
+                  timePicker =
+                          findViewById(R.id.timePicker);
+
+                  Button saveButton =
+                          findViewById(R.id.saveButton);
+
+                  timePicker.setIs24HourView(true);
+
+                  Intent intent = getIntent();
+
+                  Bundle extras = intent.getExtras();
+
+                  if (extras != null) {
+
+                      appWidgetId =
+                              extras.getInt(
+                                      AppWidgetManager.EXTRA_APPWIDGET_ID,
+                                      AppWidgetManager.INVALID_APPWIDGET_ID);
+                  }
+
+                  if (appWidgetId
+                          == AppWidgetManager.INVALID_APPWIDGET_ID) {
+
+                      finish();
+                      return;
+                  }
+
+                  SharedPreferences prefs =
+                          getSharedPreferences(
+                                  PREFS,
+                                  Context.MODE_PRIVATE);
+
+                  String oldTitle =
+                          prefs.getString(
+                                  "title_" + appWidgetId,
+                                  "");
+
+                  long oldTarget =
+                          prefs.getLong(
+                                  "target_" + appWidgetId,
+                                  0L);
+
+                  if (oldTitle != null) {
+                      eventName.setText(oldTitle);
+                  }
+
+                  Calendar calendar =
+                          Calendar.getInstance();
+
+                  if (oldTarget > 0L) {
+
+                      calendar.setTimeInMillis(oldTarget);
+
+                  } else {
+
+                      calendar.add(
+                              Calendar.DAY_OF_YEAR,
+                              1);
+                  }
+
+                  datePicker.updateDate(
+                          calendar.get(Calendar.YEAR),
+                          calendar.get(Calendar.MONTH),
+                          calendar.get(Calendar.DAY_OF_MONTH));
+
+                  timePicker.setHour(
+                          calendar.get(Calendar.HOUR_OF_DAY));
+
+                  timePicker.setMinute(
+                          calendar.get(Calendar.MINUTE));
+
+                  saveButton.setOnClickListener(v -> saveWidget());
+              }
+
+              private void saveWidget() {
+
+                  String title =
+                          eventName.getText()
+                                  .toString()
+                                  .trim();
+
+                  Calendar target =
+                          Calendar.getInstance();
+
+                  target.set(
+                          datePicker.getYear(),
+                          datePicker.getMonth(),
+                          datePicker.getDayOfMonth(),
+                          timePicker.getHour(),
+                          timePicker.getMinute(),
+                          0);
+
+                  target.set(
+                          Calendar.MILLISECOND,
+                          0);
+
+                  SharedPreferences prefs =
+                          getSharedPreferences(
+                                  PREFS,
+                                  Context.MODE_PRIVATE);
+
+                  prefs.edit()
+                          .putString(
+                                  "title_" + appWidgetId,
+                                  title)
+                          .putLong(
+                                  "target_" + appWidgetId,
+                                  target.getTimeInMillis())
+                          .apply();
+
+                  AppWidgetManager manager =
+                          AppWidgetManager.getInstance(this);
+
+                  CountdownWidget.updateWidget(
+                          this,
+                          manager,
+                          appWidgetId);
+
+                  CountdownWidget.scheduleNextTick(this);
+
+                  Intent resultValue = new Intent();
+
+                  resultValue.putExtra(
+                          AppWidgetManager.EXTRA_APPWIDGET_ID,
+                          appWidgetId);
+
+                  setResult(
+                          RESULT_OK,
+                          resultValue);
+
+                  finish();
+              }
+          }
           EOF
 
       - name: Build APK
