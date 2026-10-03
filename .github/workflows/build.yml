@@ -17,7 +17,6 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
@@ -73,6 +72,36 @@ jobs:
                   versionName "1.0"
               }
           }
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <application
+                  android:allowBackup="true"
+                  android:label="DumCountdown"
+                  android:supportsRtl="true"
+                  android:theme="@style/AppTheme">
+              </application>
+
+          </manifest>
+          EOF
+
+          cat > app/src/main/res/values/styles.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+
+              <style
+                  name="AppTheme"
+                  parent="android:style/Theme.Material.Light.NoActionBar">
+
+                  <item name="android:fontFamily">sans</item>
+                  <item name="android:colorAccent">#FFFFFF</item>
+
+              </style>
+
+          </resources>
           EOF
 
       - name: Build APK
